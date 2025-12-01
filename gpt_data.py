@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from openai import OpenAI
-from xl_class import *
 import json
 import re
 import base64

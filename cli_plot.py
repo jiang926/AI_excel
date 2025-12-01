@@ -22,8 +22,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from gpt_data import llm_model2, llm_text2
-from xl_class import write_df_to_excel
-from auto_code import check_code_safety, run_generated_code
 
 
 class OutputManager:
@@ -192,9 +190,7 @@ def plot_chart_headless(output_manager: OutputManager):
 
 def link_llm2_cli(text: str, df: Optional[pd.DataFrame], output_manager: OutputManager):
     """
-    解析 LLM 输出：
-      1) JSON 中的 'def_name' 列表，执行诸如 plot_chart(...) 或 write_df_to_excel(...)
-      2) ```python 代码块，进行简要安全检查后执行（支持 df 作为参数）
+    解析 LLM 输出：仅允许 JSON 里的 'def_name' 指令，执行 plot_chart(...)
     """
     # 兼容包含 DataFrame 花括号的 JSON
     pattern_json = r'\{[^{}]*\{.*?\}[^{}]*\}'
@@ -207,8 +203,7 @@ def link_llm2_cli(text: str, df: Optional[pd.DataFrame], output_manager: OutputM
     exec_globals = {
         "pd": pd,
         "plot_chart": plot_chart_headless(output_manager),
-        "write_df_to_excel": write_df_to_excel,
-        # 可按需加入更多白名单函数
+        # 仅暴露绘图函数，禁止写文件/执行任意代码
     }
 
     if matches_json:
@@ -226,16 +221,7 @@ def link_llm2_cli(text: str, df: Optional[pd.DataFrame], output_manager: OutputM
                 except Exception as e:
                     print(f"[WARN] 指令执行失败: {call} ({e})", file=sys.stderr)
 
-    if matches_py:
-        for code in matches_py:
-            try:
-                if not check_code_safety(code):
-                    print("[ERROR] 代码包含不允许的库，已终止执行。", file=sys.stderr)
-                    continue
-                # 允许以 df 作为参数运行
-                _ = run_generated_code(code, df=df)
-            except Exception as e:
-                print(f"[WARN] 代码执行失败: {e}", file=sys.stderr)
+    # 出于安全与简化，仅支持 JSON 指令；忽略 python 代码块
 
     # 若两者都没命中，则原样返回文本供参考
     if not matches_json and not matches_py:
