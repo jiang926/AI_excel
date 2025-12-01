@@ -1,11 +1,9 @@
 # AI_excel
-这是一个可以自动操作Excel的AI工具
+这是一个可以自动操作Excel的AI工具, 可以根据excel的内容，让ai帮我们绘图，ouf_file.html是例子。
 
-软件效果视频：[只说人话就可以做表格了！我造了一个自动操作Excel表的网站](https://www.bilibili.com/video/BV1JzKpeTEkF/?vd_source=28ba27f4f650db659b1dd1ace9f5fc5c)
 
 本项目调用大语言模型的API接口，并让模型能够调用操作Excel表文件的函数
 
-项目用streamlit编写界面
 
 
 运行命令 `pip install -r requirements.txt` 即可安装所有所需依赖。
