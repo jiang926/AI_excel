@@ -153,7 +153,10 @@ if __name__ == '__main__':
     try:
         while True:
             content = input("写入需求:")
-            text = AI_run(content, model=None, API_key="MC-9B63B87358C74B41B9365B9F3188070F")
+            # 避免将密钥硬编码到代码中：请通过环境变量提供
+            import os
+            api_key = os.environ.get("MINDCRAFT_API_KEY")
+            text = AI_run(content, model=None, API_key=api_key)
             link_llm(text, file_path)
     except KeyboardInterrupt:
         print("程序出错已退出。")

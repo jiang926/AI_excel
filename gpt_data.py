@@ -20,21 +20,21 @@ def get_image_base64(image_file):
     return None
 
 
-def llm_model2(content, model=None, API_key=None, image_file=None):
+def llm_model2(content, model=None, API_key=None, image_file=None, base_url=None):
     if model is None:
         model = "deepseek-v3-volcengine"
     else:
         model = model
 
     if model == "本地模型":
-        base_url = 'http://localhost:11434/v1/'
+        base_url_final = 'http://localhost:11434/v1/'
         api_key = 'ollama'
         model = model_local
     else:
-        base_url = 'https://api.mindcraft.com.cn/v1/'
-        #base_url = 'https://api.siliconflow.cn/v1'
+        # 优先使用传入的 base_url，其次保留默认为 DeepSeek
+        base_url_final = base_url if base_url else 'https://api.deepseek.com'
         api_key = API_key
-    client = OpenAI(base_url=base_url, api_key=api_key)
+    client = OpenAI(base_url=base_url_final, api_key=api_key)
 
     if image_file is not None:
         params = {
