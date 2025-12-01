@@ -11,6 +11,7 @@
                      --api-key sk-xxx
 """
 import argparse
+import logging
 import os
 import sys
 import re
@@ -22,6 +23,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from gpt_data import llm_model2, llm_text2
+import config
 
 
 class OutputManager:
@@ -80,8 +82,10 @@ def build_df_preview_markdown(
             preview[c] = pd.to_numeric(preview[c], errors="coerce").round(6)
         except Exception:
             pass
-    # 截断每个单元格，避免超长字符串
-    preview = preview.astype(str).applymap(lambda x: (x[:max_cell_chars] + "…") if len(x) > max_cell_chars else x)
+    # 截断每个单元格，避免超长字符串（避免 applymap 的 FutureWarning）
+    preview = preview.astype(str).apply(
+        lambda s: s.where(s.str.len() <= max_cell_chars, s.str.slice(0, max_cell_chars) + "…")
+    )
     preview_md = preview.to_markdown(index=False)
 
     meta = f"总行数: {len(df)}，总列数: {df.shape[1]}；预览行数: {min(max_rows, len(df))}，预览列数: {len(cols)}"
@@ -161,14 +165,48 @@ def plot_chart_headless(output_manager: OutputManager):
         out_path = output_manager.next_path()
         _, ext = os.path.splitext(out_path)
         ext = ext.lower()
+        # 配置下载图片按钮（摄像机图标）
+        filename_for_image = os.path.splitext(os.path.basename(out_path))[0]
+        cfg = {
+            "displaylogo": False,
+            "displayModeBar": not getattr(output_manager, "_hide_modebar", False),
+            "toImageButtonOptions": {
+                "format": "png",          # png/svg/jpeg/webp
+                "filename": filename_for_image,
+                "scale": 2,               # 提高清晰度
+                # 也可设置固定宽高: "width": 1200, "height": 700
+            },
+        }
         try:
             if ext == ".html":
                 fig.write_html(
                     out_path,
-                    include_plotlyjs="cdn",
+                    include_plotlyjs=("cdn" if not getattr(output_manager, "_offline", False) else True),
                     full_html=True,
-                    config={"displaylogo": False}
+                    config=cfg,
                 )
+                # 额外导出图片
+                if getattr(output_manager, "_also_image", False):
+                    fmt = getattr(output_manager, "_image_format", "png")
+                    scale = getattr(output_manager, "_image_scale", 2)
+                    width = getattr(output_manager, "_image_width", None)
+                    height = getattr(output_manager, "_image_height", None)
+                    image_out = os.path.splitext(out_path)[0] + f".{fmt}"
+                    try:
+                        fig.write_image(
+                            image_out,
+                            format=fmt,
+                            scale=scale,
+                            width=width,
+                            height=height,
+                        )
+                        print(f"[OK] 额外导出图片: {image_out}")
+                    except Exception as ie:
+                        print(
+                            f"[WARN] 图片导出失败，已保留 HTML。可能需要安装 Chrome/Chromium（kaleido 依赖）。"
+                            f" 可尝试运行: plotly_get_chrome ({ie})",
+                            file=sys.stderr,
+                        )
             else:
                 # 需要 kaleido 支持保存为静态图片
                 fig.write_image(out_path)  # 若未安装 kaleido 会抛错
@@ -177,9 +215,9 @@ def plot_chart_headless(output_manager: OutputManager):
             fallback = os.path.splitext(out_path)[0] + ".html"
             fig.write_html(
                 fallback,
-                include_plotlyjs="cdn",
+                include_plotlyjs=("cdn" if not getattr(output_manager, "_offline", False) else True),
                 full_html=True,
-                config={"displaylogo": False}
+                config=cfg,
             )
             print(f"[WARN] 保存为 {ext} 失败，已回退为 HTML: {fallback} ({e})", file=sys.stderr)
         else:
@@ -246,23 +284,45 @@ def main():
         ),
         help="API Key（支持环境变量：MINDCRAFT_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY）",
     )
-    parser.add_argument("--base-url", default="https://api.deepseek.com", help="OpenAI 兼容接口 base_url（默认 https://api.deepseek.com）")
+    parser.add_argument("--base-url", default=config.get_base_url(), help="OpenAI 兼容接口 base_url（默认使用环境变量 BASE_URL 或 https://api.deepseek.com）")
     # 控制发给 LLM 的数据体量，避免超长上下文
     parser.add_argument("--max-preview-rows", type=int, default=60, help="预览excel数据行数上限（默认 60）")
     parser.add_argument("--max-preview-cols", type=int, default=12, help="预览excel数据列数上限（默认 12）")
     parser.add_argument("--columns", default=None, help="预览列白名单（逗号分隔，如: time,LastPrice）")
+    # 输出控制
+    parser.add_argument("--offline", action="store_true", help="导出 HTML 时内联 Plotly 脚本（离线可用）")
+    parser.add_argument("--hide-modebar", action="store_true", help="隐藏交互工具栏")
+    # 自动导出图片
+    parser.add_argument("--also-image", action="store_true", help="在生成 HTML 后，同时导出图片文件")
+    parser.add_argument("--image-format", default="png", choices=["png", "svg", "jpeg", "webp"], help="图片格式（默认 png）")
+    parser.add_argument("--image-scale", type=int, default=2, help="图片缩放倍数，提高清晰度（默认 2）")
+    parser.add_argument("--image-width", type=int, default=None, help="图片宽度（可选）")
+    parser.add_argument("--image-height", type=int, default=None, help="图片高度（可选）")
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
     if not os.path.exists(args.file):
         print(f"[ERROR] 文件不存在: {args.file}", file=sys.stderr)
         sys.exit(2)
-    if not args.api_key:
-        print("[ERROR] 缺少 API Key，请通过 --api-key 或环境变量 MINDCRAFT_API_KEY 提供。", file=sys.stderr)
+    api_key = args.api_key or config.get_api_key()
+    if not api_key:
+        print("[ERROR] 缺少 API Key，请通过 --api-key 或环境变量提供。", file=sys.stderr)
         sys.exit(2)
 
     # 读取数据
     try:
-        df = pd.read_excel(args.file)
+        _, ext = os.path.splitext(args.file.lower())
+        if ext == ".xls":
+            df = pd.read_excel(args.file, engine="xlrd")
+        elif ext == ".xlsx":
+            df = pd.read_excel(args.file, engine="openpyxl")
+        else:
+            # 尝试常见引擎
+            try:
+                df = pd.read_excel(args.file, engine="openpyxl")
+            except Exception:
+                df = pd.read_excel(args.file, engine="xlrd")
     except Exception as e:
         print(f"[ERROR] 读取 Excel 失败: {e}", file=sys.stderr)
         sys.exit(2)
@@ -279,7 +339,7 @@ def main():
 
     # 调用 LLM
     try:
-        resp = llm_model2(text_2, model=args.model, API_key=args.api_key, base_url=args.base_url)
+        resp = llm_model2(text_2, model=args.model, API_key=api_key, base_url=args.base_url)
         text_out = llm_text2(resp)
         print("\n[LLM OUTPUT]\n" + text_out)
     except Exception as e:
@@ -288,6 +348,14 @@ def main():
 
     # 解析并执行绘图/保存指令
     output_manager = OutputManager(args.output)
+    # 传递导出选项
+    setattr(output_manager, "_offline", bool(args.offline))
+    setattr(output_manager, "_hide_modebar", bool(args.hide_modebar))
+    setattr(output_manager, "_also_image", bool(args.also_image))
+    setattr(output_manager, "_image_format", args.image_format)
+    setattr(output_manager, "_image_scale", args.image_scale)
+    setattr(output_manager, "_image_width", args.image_width)
+    setattr(output_manager, "_image_height", args.image_height)
     result = link_llm2_cli(text_out, df=df, output_manager=output_manager)
     if isinstance(result, str) and result.strip():
         # 未解析出可执行指令时，将原始文本保存为 .txt 旁路输出
