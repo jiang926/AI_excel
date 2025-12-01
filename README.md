@@ -7,18 +7,10 @@
 
 项目用streamlit编写界面
 
-文件**main.py**：streamlit界面代码
-
-文件**gpt_api.py**：调用API接口并导入操作表格的函数
-
-文件**xl_class.py**：表格操作相关函数
-
-文件**gpt_data.py**：数据分析AI
-
-文件**chart.py**：绘制统计图函数
-
-文件**requirements.txt**：所需要的python依赖库
 
 运行命令 `pip install -r requirements.txt` 即可安装所有所需依赖。
 
-运行命令 `streamlit run main.py` 即可运行网站程序
+python3.12 cli_plot.py --help  可查看参数说明
+
+demo:
+    python3.12 cli_plot.py   --prompt "分析每个地区的总人口，且学历各占比重是多少, 在一个图中，使用柱状图，来分析学历比重，图中要添加中文描述"  --file "地区学历统计.xlsx"   --output "out_file.html"   --mode "deepseek-chat"
