@@ -107,9 +107,38 @@ def plot_chart_headless(output_manager: OutputManager):
         ylabel: Optional[str] = None,
         colors: Optional[List[str]] = None,
     ):
-        if chart_type not in ["bar", "line", "pie", "scatter"]:
+        supported = ["bar", "line", "pie", "scatter", "heatmap"]
+        if chart_type not in supported:
             print(f"[WARN] chart_type '{chart_type}' not supported.", file=sys.stderr)
             return
+
+        # 统一的默认配色
+        palette = colors or px.colors.qualitative.Plotly
+
+        def _apply_layout(fig_obj: go.Figure):
+            fig_obj.update_layout(
+                title=dict(text=title, x=0.02, xanchor="left", font=dict(size=20)),
+                legend=dict(title=legend_title, orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                template="plotly_white",
+                font=dict(family="Arial", size=13),
+                margin=dict(l=60, r=30, t=70, b=60),
+                colorway=palette,
+            )
+            fig_obj.update_xaxes(
+                title=(xlabel if xlabel else x_column),
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.08)",
+                zeroline=False,
+            )
+            fig_obj.update_yaxes(
+                title=(ylabel if ylabel else ("Value" if y_columns else "")),
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.08)",
+                zeroline=False,
+            )
+            # 线/散点交互更好
+            if chart_type in ["line", "scatter"]:
+                fig_obj.update_layout(hovermode="x unified")
 
         if chart_type == "pie":
             # y_columns[0] 作为 values
@@ -118,8 +147,27 @@ def plot_chart_headless(output_manager: OutputManager):
                 names=x_column,
                 values=y_columns[0] if y_columns else None,
                 title=title,
-                color_discrete_sequence=colors,
+                color_discrete_sequence=palette,
+                hole=0.25,
             )
+            fig.update_traces(textinfo="percent+label", textposition="inside")
+            _apply_layout(fig)
+        elif chart_type == "heatmap":
+            # 适配简单热力图：x 轴为 x_column，z 为首个 y_columns 数值列
+            if not y_columns:
+                print("[WARN] heatmap 需要至少一个数值列，已跳过。", file=sys.stderr)
+                return
+            z_vals = [data[y_columns[0]].tolist()]
+            fig = go.Figure(
+                data=go.Heatmap(
+                    z=z_vals,
+                    x=data[x_column],
+                    y=[legend_title or y_columns[0]],
+                    colorscale="Blues",
+                    colorbar_title=legend_title or "value",
+                )
+            )
+            _apply_layout(fig)
         else:
             fig = go.Figure()
             series = y_columns or []
@@ -130,7 +178,8 @@ def plot_chart_headless(output_manager: OutputManager):
                             x=data[x_column],
                             y=data[y_col],
                             name=y_col,
-                            marker_color=(colors[i] if colors and i < len(colors) else None),
+                            marker_color=(palette[i] if i < len(palette) else None),
+                            marker_line_width=0.5,
                         )
                     )
                 elif chart_type == "line":
@@ -140,7 +189,11 @@ def plot_chart_headless(output_manager: OutputManager):
                             y=data[y_col],
                             mode="lines",
                             name=y_col,
-                            line=dict(color=(colors[i] if colors and i < len(colors) else None)),
+                            line=dict(
+                                color=(palette[i] if i < len(palette) else None),
+                                width=2.2,
+                                shape="spline",
+                            ),
                         )
                     )
                 elif chart_type == "scatter":
@@ -150,16 +203,18 @@ def plot_chart_headless(output_manager: OutputManager):
                             y=data[y_col],
                             mode="markers",
                             name=y_col,
-                            marker=dict(color=(colors[i] if colors and i < len(colors) else None)),
+                            marker=dict(
+                                color=(palette[i] if i < len(palette) else None),
+                                size=8,
+                                opacity=0.9,
+                            ),
                         )
                     )
 
             fig.update_layout(
-                title=title,
-                xaxis_title=(xlabel if xlabel else x_column),
-                yaxis_title=(ylabel if ylabel else ("Value" if y_columns else "")),
                 legend_title=legend_title,
             )
+            _apply_layout(fig)
 
         # 保存文件
         out_path = output_manager.next_path()
@@ -346,7 +401,22 @@ def main():
         print(f"[ERROR] 模型调用失败: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # 解析并执行绘图/保存指令
+    # 若模型直接返回 HTML，则按指定路径落盘
+    html_match = re.search(r"<!doctype html|<html", text_out, re.IGNORECASE)
+    if html_match:
+        html_start = html_match.start()
+        html_body = text_out[html_start:]
+        base, ext = os.path.splitext(args.output)
+        out_path = args.output if ext else f"{args.output}.html"
+        out_dir = os.path.dirname(out_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html_body)
+        print(f"[OK] 已直接保存模型返回的 HTML 到: {out_path}")
+        sys.exit(0)
+
+    # 解析并执行绘图/保存指令（非 HTML 返回）
     output_manager = OutputManager(args.output)
     # 传递导出选项
     setattr(output_manager, "_offline", bool(args.offline))
